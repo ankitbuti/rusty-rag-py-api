@@ -8,5 +8,5 @@ dependencies = [
     "fastapi>=0.116.2",
     "python-multipart>=0.0.20",
     "uvicorn[standard]>=0.35.0",
-    "weaviate>=0.1.2",
+    "weaviate-client>=4.16.10",
 ]

@@ -3,4 +3,3 @@ uvicorn[standard]==0.24.0
 gunicorn==21.2.0
 python-multipart==0.0.6
 weaviate-client==4.4.0
-
