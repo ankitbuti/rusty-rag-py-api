@@ -27,6 +27,9 @@ class Record(BaseModel):
 class RecordCreate(BaseModel):
     title: str
     content: str
+    repo_url: Optional[str] = ""
+    package_url: Optional[str] = ""
+    description: Optional[str] = ""
     tags: Optional[List[str]] = []
     metadata: Optional[Dict[str, Any]] = {}
 
@@ -34,6 +37,9 @@ class RecordResponse(BaseModel):
     id: str
     title: str
     content: str
+    repo_url: str
+    package_url: str
+    description: str
     tags: List[str]
     metadata: Dict[str, Any]
     created_at: datetime
@@ -68,20 +74,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-async def weaviate_client():
+async def get_weaviate_client():
+    """Get Weaviate client connection"""
+    try:
+        # Best practice: store your credentials in environment variables
+        weaviate_url = os.environ.get("WEAVIATE_URL")
+        weaviate_api_key = os.environ.get("WEAVIATE_API_KEY")
+        
+        if not weaviate_url or not weaviate_api_key:
+            raise HTTPException(
+                status_code=500, 
+                detail="Weaviate configuration missing. Please set WEAVIATE_URL and WEAVIATE_API_KEY environment variables."
+            )
 
+        # Connect to Weaviate Cloud
+        client = weaviate.connect_to_weaviate_cloud(
+            cluster_url=weaviate_url,
+            auth_credentials=Auth.api_key(weaviate_api_key),
+        )
 
-    # Best practice: store your credentials in environment variables
-    weaviate_url = os.environ["WEAVIATE_URL"]
-    weaviate_api_key = os.environ["WEAVIATE_API_KEY"]
-
-    # Connect to Weaviate Cloud
-    client = weaviate.connect_to_weaviate_cloud(
-        cluster_url=weaviate_url,
-        auth_credentials=Auth.api_key(weaviate_api_key),
-    )
-
-    print(client.is_ready())
+        if not client.is_ready():
+            raise HTTPException(status_code=500, detail="Weaviate client is not ready")
+            
+        return client
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Weaviate: {str(e)}")
 
 @app.get("/")
 async def root():
@@ -113,6 +130,9 @@ async def create_record(record: RecordCreate):
             id=record_id,
             title=record.title,
             content=record.content,
+            repo_url=record.repo_url or "",
+            package_url=record.package_url or "",
+            description=record.description or "",
             tags=record.tags or [],
             metadata=record.metadata or {},
             created_at=now,
@@ -126,6 +146,9 @@ async def create_record(record: RecordCreate):
             id=new_record.id,
             title=new_record.title,
             content=new_record.content,
+            repo_url=new_record.repo_url,
+            package_url=new_record.package_url,
+            description=new_record.description,
             tags=new_record.tags,
             metadata=new_record.metadata,
             created_at=new_record.created_at,
@@ -153,6 +176,9 @@ async def create_multiple_records(records: List[RecordCreate]):
                 id=record_id,
                 title=record.title,
                 content=record.content,
+                repo_url=record.repo_url or "",
+                package_url=record.package_url or "",
+                description=record.description or "",
                 tags=record.tags or [],
                 metadata=record.metadata or {},
                 created_at=now,
@@ -166,6 +192,9 @@ async def create_multiple_records(records: List[RecordCreate]):
                 id=new_record.id,
                 title=new_record.title,
                 content=new_record.content,
+                repo_url=new_record.repo_url,
+                package_url=new_record.package_url,
+                description=new_record.description,
                 tags=new_record.tags,
                 metadata=new_record.metadata,
                 created_at=new_record.created_at,
@@ -207,6 +236,9 @@ async def search_records(search_query: SearchQuery):
                     id=record.id,
                     title=record.title,
                     content=record.content,
+                    repo_url=record.repo_url,
+                    package_url=record.package_url,
+                    description=record.description,
                     tags=record.tags,
                     metadata=record.metadata,
                     created_at=record.created_at,
@@ -244,6 +276,9 @@ async def get_all_records(limit: int = 50, offset: int = 0):
                 id=record.id,
                 title=record.title,
                 content=record.content,
+                repo_url=record.repo_url,
+                package_url=record.package_url,
+                description=record.description,
                 tags=record.tags,
                 metadata=record.metadata,
                 created_at=record.created_at,
@@ -265,12 +300,16 @@ async def get_record(record_id: str):
         id=record.id,
         title=record.title,
         content=record.content,
+        repo_url=record.repo_url,
+        package_url=record.package_url,
+        description=record.description,
         tags=record.tags,
         metadata=record.metadata,
         created_at=record.created_at,
         updated_at=record.updated_at
     )
 
+# For local development only
 if __name__ == "__main__":
     # Get port from environment variable (required for Cloud Run)
     port = int(os.environ.get("PORT", 8080))
