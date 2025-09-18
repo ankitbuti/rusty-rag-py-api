@@ -6,14 +6,14 @@ import uvicorn
 import os
 from datetime import datetime
 import uuid
-    
+
 import weaviate
 from weaviate.classes.init import Auth
 
 # Data Models
 class Record(BaseModel):
     id: Optional[str] = None
-    
+
     title: str
     content: str
     repo_url: str
@@ -34,16 +34,11 @@ class RecordCreate(BaseModel):
     metadata: Optional[Dict[str, Any]] = {}
 
 class RecordResponse(BaseModel):
-    id: str
-    title: str
-    content: str
-    repo_url: str
-    package_url: str
+    name: str
     description: str
-    tags: List[str]
-    metadata: Dict[str, Any]
-    created_at: datetime
-    updated_at: datetime
+    readme: str
+    crates_url: str
+    repo_url: str
 
 class SearchQuery(BaseModel):
     query: str
@@ -80,10 +75,10 @@ async def get_weaviate_client():
         # Best practice: store your credentials in environment variables
         weaviate_url = os.environ.get("WEAVIATE_URL")
         weaviate_api_key = os.environ.get("WEAVIATE_API_KEY")
-        
+
         if not weaviate_url or not weaviate_api_key:
             raise HTTPException(
-                status_code=500, 
+                status_code=500,
                 detail="Weaviate configuration missing. Please set WEAVIATE_URL and WEAVIATE_API_KEY environment variables."
             )
 
@@ -95,7 +90,7 @@ async def get_weaviate_client():
 
         if not client.is_ready():
             raise HTTPException(status_code=500, detail="Weaviate client is not ready")
-            
+
         return client
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to connect to Weaviate: {str(e)}")
@@ -124,7 +119,7 @@ async def create_record(record: RecordCreate):
         # Generate unique ID and timestamps
         record_id = str(uuid.uuid4())
         now = datetime.utcnow()
-        
+
         # Create new record
         new_record = Record(
             id=record_id,
@@ -138,10 +133,10 @@ async def create_record(record: RecordCreate):
             created_at=now,
             updated_at=now
         )
-        
+
         # Store in memory
         records_storage[record_id] = new_record
-        
+
         return RecordResponse(
             id=new_record.id,
             title=new_record.title,
@@ -163,14 +158,14 @@ async def create_multiple_records(records: List[RecordCreate]):
     try:
         if len(records) > 100:  # Limit batch size
             raise HTTPException(status_code=400, detail="Batch size cannot exceed 100 records")
-        
+
         created_records = []
         now = datetime.utcnow()
-        
+
         for record in records:
             # Generate unique ID
             record_id = str(uuid.uuid4())
-            
+
             # Create new record
             new_record = Record(
                 id=record_id,
@@ -184,10 +179,10 @@ async def create_multiple_records(records: List[RecordCreate]):
                 created_at=now,
                 updated_at=now
             )
-            
+
             # Store in memory
             records_storage[record_id] = new_record
-            
+
             created_records.append(RecordResponse(
                 id=new_record.id,
                 title=new_record.title,
@@ -200,7 +195,7 @@ async def create_multiple_records(records: List[RecordCreate]):
                 created_at=new_record.created_at,
                 updated_at=new_record.updated_at
             ))
-        
+
         return created_records
     except HTTPException:
         raise
@@ -210,54 +205,32 @@ async def create_multiple_records(records: List[RecordCreate]):
 @app.post("/search", response_model=SearchResponse)
 async def search_records(search_query: SearchQuery):
     """Search records by query and optional tags"""
+    client = await get_weaviate_client()
     try:
-        query = search_query.query.lower()
-        limit = min(search_query.limit, 100)  # Cap at 100 results
-        filter_tags = search_query.tags or []
-        
-        matching_records = []
-        
-        for record in records_storage.values():
-            # Check if record matches search criteria
-            matches_query = (
-                query in record.title.lower() or 
-                query in record.content.lower() or
-                any(query in tag.lower() for tag in record.tags)
-            )
-            
-            # Check if record has required tags (if specified)
-            matches_tags = (
-                not filter_tags or 
-                any(tag in record.tags for tag in filter_tags)
-            )
-            
-            if matches_query and matches_tags:
-                matching_records.append(RecordResponse(
-                    id=record.id,
-                    title=record.title,
-                    content=record.content,
-                    repo_url=record.repo_url,
-                    package_url=record.package_url,
-                    description=record.description,
-                    tags=record.tags,
-                    metadata=record.metadata,
-                    created_at=record.created_at,
-                    updated_at=record.updated_at
-                ))
-        
-        # Sort by creation date (newest first)
-        matching_records.sort(key=lambda x: x.created_at, reverse=True)
-        
-        # Apply limit
-        results = matching_records[:limit]
-        
-        return SearchResponse(
-            results=results,
-            total=len(results),
-            query=search_query.query
+        crates = client.collections.get(name="crates")
+        response = crates.query.near_text(
+            query=search_query.query,
+            limit=search_query.limit,
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error searching records: {str(e)}")
+
+        records = []
+        for crate in response.objects:
+            records.push(RecordResponse(
+                name=crate.properties['name'],
+                description=crate.properties['description'],
+                readme=crate.properties['readme'],
+                crates_url=f"https://crates.io/crates/{crate.properties['name']}",
+                repo_url=crate.properties['repository'],
+            ))
+        return SearchResponse(
+            results=records,
+            total=len(records),
+            query=search_query.query,
+        )
+    except:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    finally:
+        client.close()
 
 @app.get("/records", response_model=List[RecordResponse])
 async def get_all_records(limit: int = 50, offset: int = 0):
@@ -265,12 +238,12 @@ async def get_all_records(limit: int = 50, offset: int = 0):
     try:
         all_records = list(records_storage.values())
         all_records.sort(key=lambda x: x.created_at, reverse=True)
-        
+
         # Apply pagination
         start = offset
         end = offset + limit
         paginated_records = all_records[start:end]
-        
+
         return [
             RecordResponse(
                 id=record.id,
@@ -294,7 +267,7 @@ async def get_record(record_id: str):
     """Get a specific record by ID"""
     if record_id not in records_storage:
         raise HTTPException(status_code=404, detail="Record not found")
-    
+
     record = records_storage[record_id]
     return RecordResponse(
         id=record.id,
