@@ -202,20 +202,20 @@ async def create_multiple_records(records: List[RecordCreate]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating records: {str(e)}")
 
-@app.post("/search", response_model=SearchResponse)
-async def search_records(search_query: SearchQuery):
+@app.get("/search", response_model=SearchResponse)
+async def search_records(query: str, limit: int | None = None):
     """Search records by query and optional tags"""
     client = await get_weaviate_client()
     try:
         crates = client.collections.get(name="crates")
         response = crates.query.near_text(
-            query=search_query.query,
-            limit=search_query.limit,
+            query=query,
+            limit=limit,
         )
 
         records = []
         for crate in response.objects:
-            records.push(RecordResponse(
+            records.append(RecordResponse(
                 name=crate.properties['name'],
                 description=crate.properties['description'],
                 readme=crate.properties['readme'],
@@ -225,9 +225,9 @@ async def search_records(search_query: SearchQuery):
         return SearchResponse(
             results=records,
             total=len(records),
-            query=search_query.query,
+            query=query,
         )
-    except:
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
     finally:
         client.close()
