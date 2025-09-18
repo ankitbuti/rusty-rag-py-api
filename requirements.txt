@@ -8,6 +8,7 @@ cryptography==46.0.1
 deprecation==2.1.0
 fastapi==0.116.2
 grpcio==1.75.0
+gunicorn==23.0.0
 h11==0.16.0
 httpcore==1.0.9
 httptools==0.6.4
